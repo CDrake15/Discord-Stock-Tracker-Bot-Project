@@ -75,7 +75,7 @@ async def sethighalert(ctx, stock: str, price: float):
 @tasks.loop(seconds=5)
 async def check_alerts():
     to_remove = []
-    for user_id, user_alerts in alerts.items():
+    for user_id, user_alerts in list(alerts.items()):
         for alert in user_alerts:
             stock = alert['stock']
             price = alert['price']
