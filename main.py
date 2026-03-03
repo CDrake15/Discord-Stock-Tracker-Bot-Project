@@ -47,53 +47,81 @@ async def setlowalert(ctx, stock: str, price: float):
     try:
         user_id = ctx.author.id
         stock = stock.upper()
-
+        # Ensure user exists
         if user_id not in alerts:
-            alerts[user_id] = []
-
-        alerts[user_id].append({'stock': stock, 'price': price, 'type': 'low'})
+            alerts[user_id] = {}
+        # Ensure stock exists for this user
+        if stock not in alerts[user_id]:
+            alerts[user_id][stock] = []
+        # Add alert
+        alerts[user_id][stock].append({'price': price, 'type': 'low'})
         await ctx.send(f"Low price alert set for {stock} at {price}. You will receive a DM when the price hits this level.")
     except Exception as e:
         await ctx.send(f"An error occurred while setting the low price alert for {stock}: {e}")
         
-
 # Command to allow a user to set an alert when a stock hits a high price (!sethighalert [stock] [price]) make sure to check if the price is already higher than the alert price and send an alert if it is
 @bot.command()
 async def sethighalert(ctx, stock: str, price: float):
     try:
         user_id = ctx.author.id
         stock = stock.upper()
-
+        # Ensure user exists
         if user_id not in alerts:
-            alerts[user_id] = []
+            alerts[user_id] = {}
 
-        alerts[user_id].append({'stock': stock, 'price': price, 'type': 'high'})
+        # Ensure stock exists for this user
+        if stock not in alerts[user_id]:
+            alerts[user_id][stock] = []
+        # Add alert
+        alerts[user_id][stock].append({'price': price, 'type': 'high'})
         await ctx.send(f"High price alert set for {stock} at {price}. You will receive a DM when the price hits this level.")
     except Exception as e:
         await ctx.send(f"An error occurred while setting the high price alert for {stock}: {e}")
+
 # Task to check the stock prices every minute and send alerts if necessary
 @tasks.loop(seconds=5)
 async def check_alerts():
-    to_remove = []
-    for user_id, user_alerts in list(alerts.items()):
-        for alert in user_alerts:
-            stock = alert['stock']
-            price = alert['price']
-            alert_type = alert['type']
-
+    try:
+        # Loop through each user safely
+        for user_id, stocks in list(alerts.items()):
             try:
-                stock_data = yf.Ticker(stock)
-                current_price = stock_data.info['regularMarketPrice']
-
-                if (alert_type == 'low' and current_price <= price) or (alert_type == 'high' and current_price >= price):
-                    user = await bot.fetch_user(user_id)
-                    await user.send(f"Alert: {stock} has hit your {'low' if alert_type == 'low' else 'high'} price of {price}. Current price: {current_price}.")
-                    to_remove.append((user_id, alert))
-            except Exception as e:
-                print(f"An error occurred while checking alerts for {stock}: {e}")
-
-    for user_id, alert in to_remove:
-        alerts[user_id].remove(alert)
+                # Loop through each stock the user is watching
+                for stock, alert_list in list(stocks.items()):
+                    try:
+                        stock_data = yf.Ticker(stock)
+                        current_price = stock_data.info.get('regularMarketPrice')
+                        if current_price is None:
+                            continue
+                        # Loop through each alert for this stock
+                        for alert in list(alert_list):
+                            price = alert['price']
+                            alert_type = alert['type']
+                            # Check alert condition
+                            if (alert_type == 'low' and current_price <= price) or \
+                               (alert_type == 'high' and current_price >= price):
+                                try:
+                                    user = await bot.fetch_user(user_id)
+                                    await user.send(
+                                        f"Alert: {stock} has hit your "
+                                        f"{'low' if alert_type == 'low' else 'high'} price of {price}. "
+                                        f"Current price: {current_price}."
+                                    )
+                                except Exception as dm_error:
+                                    print(f"Error sending DM to {user_id}: {dm_error}")
+                                # Remove the alert after sending
+                                alert_list.remove(alert)
+                        # If no alerts left for this stock, remove it
+                        if not alert_list:
+                            del stocks[stock]
+                    except Exception as stock_error:
+                        print(f"Error checking stock {stock}: {stock_error}")
+                # If user has no stocks left, remove user entry
+                if not stocks:
+                    del alerts[user_id]
+            except Exception as user_error:
+                print(f"Error processing alerts for user {user_id}: {user_error}")
+    except Exception as main_error:
+        print(f"General error in check_alerts loop: {main_error}")
 
 # Command to allow a user to remove an alert (!removealert [stock])
 @bot.command()
